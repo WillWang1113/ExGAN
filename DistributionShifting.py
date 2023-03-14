@@ -1,10 +1,9 @@
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import os
 from torch.utils.data import Dataset, DataLoader
-from skimage.transform import resize
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -24,11 +23,9 @@ class NWSDataset(Dataset):
     NWS Dataset
     """
 
-    def __init__(
-            self, fake='data/fake.pt', c=0.75, i=1, n=2557
-    ):
-        val = int(n * (c ** i))
-        self.real = torch.load('data/real.pt').cuda(gpu_id)
+    def __init__(self, fake='fake.pt', c=0.75, i=1, n=9864):
+        val = int(n * (c**i))
+        self.real = torch.load('real.pt').cuda(gpu_id)
         self.real.requires_grad = False
         self.fake = torch.load(fake).cuda(gpu_id)
         self.fake.requires_grad = False
@@ -49,75 +46,87 @@ def weights_init_normal(m):
 
 def convTBNReLU(in_channels, out_channels, kernel_size=4, stride=2, padding=1):
     return nn.Sequential(
-        nn.ConvTranspose2d(
+        nn.ConvTranspose1d(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
         ),
-        nn.InstanceNorm2d(out_channels),
+        nn.InstanceNorm1d(out_channels),
         nn.LeakyReLU(0.2, True),
     )
 
 
 def convBNReLU(in_channels, out_channels, kernel_size=4, stride=2, padding=1):
     return nn.Sequential(
-        nn.Conv2d(
+        nn.Conv1d(
             in_channels,
             out_channels,
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
         ),
-        nn.InstanceNorm2d(out_channels),
+        nn.InstanceNorm1d(out_channels),
         nn.LeakyReLU(0.2, True),
     )
 
 
 class Generator(nn.Module):
+
     def __init__(self, in_channels, out_channels):
         super(Generator, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.block1 = convTBNReLU(in_channels, 512, 4, 1, 0)
-        self.block2 = convTBNReLU(512, 256)
+        self.block1 = convTBNReLU(in_channels, 256, 12, 1, 0)
+        # self.block2 = convTBNReLU(512, 256)
         self.block3 = convTBNReLU(256, 128)
         self.block4 = convTBNReLU(128, 64)
-        self.block5 = nn.ConvTranspose2d(64, out_channels, 4, 2, 1)
+        self.block5 = nn.ConvTranspose1d(64, out_channels, 4, 2, 1)
 
-    def forward(self, noise):
-        out = self.block1(noise)
-        out = self.block2(out)
+    def forward(self, inp):
+        # print(inp.shape)
+        out = self.block1(inp)
+        # print(out.shape)
+        # out = self.block2(out)
+        # print(out.shape)
         out = self.block3(out)
+        # print(out.shape)
         out = self.block4(out)
+        # print(out.shape)
         return torch.tanh(self.block5(out))
 
 
 class Discriminator(nn.Module):
+
     def __init__(self, in_channels):
         super(Discriminator, self).__init__()
         self.in_channels = in_channels
         self.block1 = convBNReLU(self.in_channels, 64)
         self.block2 = convBNReLU(64, 128)
         self.block3 = convBNReLU(128, 256)
-        self.block4 = convBNReLU(256, 512)
-        self.block5 = nn.Conv2d(512, 64, 4, 1, 0)
-        self.source = nn.Linear(64, 1)
+        # self.block4 = convBNReLU(256, 512)
+        self.block5 = nn.Conv1d(256, 64, 4, 1, 0)
+        self.source = nn.Linear(64 * 9, 1)
 
-    def forward(self, input):
-        out = self.block1(input)
+    def forward(self, inp):
+        # print(inp.shape)
+        out = self.block1(inp)
+        # print(out.shape)
         out = self.block2(out)
+        # print(out.shape)
         out = self.block3(out)
-        out = self.block4(out)
+        # print(out.shape)
+        # out = self.block4(out)
         out = self.block5(out)
+        # print(out.shape)
         size = out.shape[0]
         out = out.view(size, -1)
         source = torch.sigmoid(self.source(out))
         return source
 
 
-latentdim = 20
+latentdim = 24
 criterionSource = nn.BCELoss()
 G = Generator(in_channels=latentdim, out_channels=1).cuda(gpu_id)
 D = Discriminator(in_channels=1).cuda(gpu_id)
@@ -126,29 +135,38 @@ D.apply(weights_init_normal)
 
 optimizerG = optim.Adam(G.parameters(), lr=0.00002, betas=(0.5, 0.999))
 optimizerD = optim.Adam(D.parameters(), lr=0.00001, betas=(0.5, 0.999))
-static_z = Variable(FloatTensor(torch.randn((81, latentdim, 1, 1)))).cuda(gpu_id)
+static_z = Variable(FloatTensor(torch.randn((36, latentdim, 1)))).cuda(gpu_id)
 
 
 def sample_image(stage, epoch):
-    static_sample = G(static_z).detach().cpu()
-    static_sample = (static_sample + 1) / 2.0
-    save_image(static_sample, DIRNAME + "stage%depoch%d.png" % (stage, epoch), nrow=9)
+    static_sample = G(static_z).detach().cpu().squeeze()
+    fig, axs = plt.subplots(6, 6, sharex=True, sharey=True)
+    axs = axs.flatten()
+    for i in range(len(static_sample)):
+        axs[i].plot(range(96), static_sample[i])
+        axs[i].xaxis.set_major_locator(plt.MaxNLocator(2))
+        axs[i].yaxis.set_major_locator(plt.MaxNLocator(2))
+    fig.savefig(DIRNAME + "stage%depoch%d.png" % (stage, epoch))
+    plt.close(fig)
 
 
 c = 0.75
-k = 10
+k = 5
+# k = 10
 DIRNAME = 'DistShift/'
 os.makedirs(DIRNAME, exist_ok=True)
 board = SummaryWriter(log_dir=DIRNAME)
 
-G.load_state_dict(torch.load('DCGAN/G999.pt'))
-D.load_state_dict(torch.load('DCGAN/D999.pt'))
+G.load_state_dict(torch.load('DCGAN/G99.pt'))
+D.load_state_dict(torch.load('DCGAN/D99.pt'))
 step = 0
-fake_name = 'data/fake.pt'
-n = 2557
+fake_name = 'fake.pt'
+n = 9864
 for i in range(1, k):
-    dataloader = DataLoader(NWSDataset(fake=fake_name, c=c, i=i, n=n), batch_size=256, shuffle=True)
-    for epoch in range(0, 100):
+    dataloader = DataLoader(NWSDataset(fake=fake_name, c=c, i=i, n=n),
+                            batch_size=256,
+                            shuffle=True)
+    for epoch in range(100):
         print(epoch)
         for realdata in dataloader:
             noise = 1e-5 * max(1 - (epoch / 100.0), 0)
@@ -166,18 +184,22 @@ for i in range(1, k):
             falseTensor = falseTensor.view(-1, 1).cuda(gpu_id)
             realdata = realdata.cuda(gpu_id)
             realSource = D(realdata)
-            realLoss = criterionSource(realSource, trueTensor.expand_as(realSource))
-            latent = Variable(torch.randn(batch_size, latentdim, 1, 1)).cuda(gpu_id)
+            realLoss = criterionSource(realSource,
+                                       trueTensor.expand_as(realSource))
+            latent = Variable(torch.randn(batch_size, latentdim,
+                                          1)).cuda(gpu_id)
             fakeGen = G(latent)
             fakeGenSource = D(fakeGen.detach())
-            fakeGenLoss = criterionSource(fakeGenSource, falseTensor.expand_as(fakeGenSource))
+            fakeGenLoss = criterionSource(fakeGenSource,
+                                          falseTensor.expand_as(fakeGenSource))
             lossD = realLoss + fakeGenLoss
             optimizerD.zero_grad()
             lossD.backward()
             torch.nn.utils.clip_grad_norm_(D.parameters(), 20)
             optimizerD.step()
             fakeGenSource = D(fakeGen)
-            lossG = criterionSource(fakeGenSource, trueTensor.expand_as(fakeGenSource))
+            lossG = criterionSource(fakeGenSource,
+                                    trueTensor.expand_as(fakeGenSource))
             optimizerG.zero_grad()
             lossG.backward()
             torch.nn.utils.clip_grad_norm_(G.parameters(), 20)
@@ -187,8 +209,12 @@ for i in range(1, k):
             board.add_scalar('lossD', lossD.item(), step)
             board.add_scalar('lossG', lossG.item(), step)
         if (epoch + 1) % 50 == 0:
-            torch.save(G.state_dict(), DIRNAME + "Gstage" + str(i) + 'epoch' + str(epoch) + ".pt")
-            torch.save(D.state_dict(), DIRNAME + "Dstage" + str(i) + 'epoch' + str(epoch) + ".pt")
+            torch.save(
+                G.state_dict(),
+                DIRNAME + "Gstage" + str(i) + 'epoch' + str(epoch) + ".pt")
+            torch.save(
+                D.state_dict(),
+                DIRNAME + "Dstage" + str(i) + 'epoch' + str(epoch) + ".pt")
         if (epoch + 1) % 10 == 0:
             with torch.no_grad():
                 G.eval()
@@ -196,9 +222,13 @@ for i in range(1, k):
                 G.train()
     with torch.no_grad():
         G.eval()
-        fsize = int((1 - (c ** (i + 1))) * n / c)
-        fakeSamples = G(Variable(torch.randn(fsize, latentdim, 1, 1)).cuda(gpu_id))
-        sums = fakeSamples.sum(dim=(1, 2, 3)).detach().cpu().numpy().argsort()[::-1].copy()
+        fsize = int((1 - (c**(i + 1))) * n / c)
+        fakeSamples = G(
+            Variable(torch.randn(fsize, latentdim, 1)).cuda(gpu_id))
+
+        sums = torch.trapezoid(
+            fakeSamples.squeeze(),
+            dim=1).detach().cpu().numpy().argsort()[::-1].copy()
         fake_name = DIRNAME + 'fake' + str(i + 1) + '.pt'
         torch.save(fakeSamples.data[sums], fake_name)
         del fakeSamples

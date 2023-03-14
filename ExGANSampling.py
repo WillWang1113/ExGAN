@@ -1,4 +1,4 @@
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -45,6 +45,8 @@ class Generator(nn.Module):
 
 latentdim = 20
 G = Generator(in_channels=latentdim, out_channels=1).cuda()
+
+# TODO: fitting
 genpareto_params = (1.33, 0, 0.0075761900937239765)
 threshold = -0.946046018600464
 rv = genpareto(*genpareto_params)

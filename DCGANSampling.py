@@ -1,4 +1,4 @@
-from tensorboardX import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -49,7 +49,7 @@ genpareto_params = (1.33, 0, 0.0075761900937239765)
 threshold = -0.946046018600464
 rv = genpareto(*genpareto_params)
 
-G.load_state_dict(torch.load('DCGAN/G999.pt'))
+G.load_state_dict(torch.load('DCGAN/G99.pt'))
 G.eval()
 
 c = 0.75
@@ -60,7 +60,7 @@ for tau in [0.05, 0.01]:
     images = []
     count = 0
     t = time.time()
-    while count<100:
+    while count<10:
         latent = Variable(FloatTensor(torch.randn((100, latentdim, 1, 1)))).cuda()
         image = G(latent)
         sums = image.sum(dim=(1, 2, 3))/4096 >= val
