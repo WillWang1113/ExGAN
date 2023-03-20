@@ -2,16 +2,20 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch import LongTensor, FloatTensor
-from scipy.stats import skewnorm, genpareto
-from torchvision.utils import save_image
-import sys
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--epochs", type=int, default=300)
+parser.add_argument("--data", type=str, default="pv")
+opt = parser.parse_args()
+E = opt.epochs
+data_type = opt.data
+gpu_id = 2
 
 
 class NWSDataset(Dataset):
@@ -20,7 +24,7 @@ class NWSDataset(Dataset):
     """
 
     def __init__(self, path='./', dsize=1644):
-        self.real = torch.load(path + 'real.pt').cuda()
+        self.real = torch.load(path + f'real_{data_type}.pt').cuda(gpu_id)
         # self.indices = np.random.permutation(dsize)
         self.real.requires_grad = False
 
@@ -82,15 +86,10 @@ class Generator(nn.Module):
         self.block5 = nn.ConvTranspose1d(64, out_channels, 4, 2, 1)
 
     def forward(self, inp):
-        # print(inp.shape)
         out = self.block1(inp)
-        # print(out.shape)
         # out = self.block2(out)
-        # print(out.shape)
         out = self.block3(out)
-        # print(out.shape)
         out = self.block4(out)
-        # print(out.shape)
         return torch.tanh(self.block5(out))
 
 
@@ -128,14 +127,14 @@ criterionSource = nn.BCELoss()
 criterionContinuous = nn.L1Loss()
 criterionValG = nn.L1Loss()
 criterionValD = nn.L1Loss()
-G = Generator(in_channels=latentdim, out_channels=1).cuda()
-D = Discriminator(in_channels=1).cuda()
+G = Generator(in_channels=latentdim, out_channels=1).cuda(gpu_id)
+D = Discriminator(in_channels=1).cuda(gpu_id)
 G.apply(weights_init_normal)
 D.apply(weights_init_normal)
 
 optimizerG = optim.Adam(G.parameters(), lr=0.0002, betas=(0.5, 0.999))
 optimizerD = optim.Adam(D.parameters(), lr=0.0001, betas=(0.5, 0.999))
-static_z = Variable(FloatTensor(torch.randn((36, latentdim, 1)))).cuda()
+static_z = Variable(FloatTensor(torch.randn((36, latentdim, 1)))).cuda(gpu_id)
 
 
 def sample_image(batches_done):
@@ -151,16 +150,16 @@ def sample_image(batches_done):
     plt.close(fig)
 
 
-DIRNAME = 'DCGAN/'
+DIRNAME = f'DCGAN_{data_type}/'
 os.makedirs(DIRNAME, exist_ok=True)
 
 board = SummaryWriter(log_dir=DIRNAME)
 
 step = 0
-for epoch in range(100):
+for epoch in range(E):
     print(epoch)
     for images in dataloader:
-        noise = 1e-5 * max(1 - (epoch / 100.0), 0)
+        noise = 1e-5 * max(1 - ((epoch + 1) / E), 0)
         step += 1
         batch_size = images[0].shape[0]
         trueTensor = 0.7 + 0.5 * torch.rand(batch_size)
@@ -171,13 +170,13 @@ for epoch in range(100):
             probFlip * falseTensor + (1 - probFlip) * trueTensor,
             probFlip * trueTensor + (1 - probFlip) * falseTensor,
         )
-        trueTensor = trueTensor.view(-1, 1).cuda()
-        falseTensor = falseTensor.view(-1, 1).cuda()
-        images = images.cuda()
-        realSource = D(images + noise * torch.randn_like(images).cuda())
+        trueTensor = trueTensor.view(-1, 1).cuda(gpu_id)
+        falseTensor = falseTensor.view(-1, 1).cuda(gpu_id)
+        images = images.cuda(gpu_id)
+        realSource = D(images + noise * torch.randn_like(images).cuda(gpu_id))
         realLoss = criterionSource(realSource,
                                    trueTensor.expand_as(realSource))
-        latent = Variable(torch.randn(batch_size, latentdim, 1)).cuda()
+        latent = Variable(torch.randn(batch_size, latentdim, 1)).cuda(gpu_id)
         fakeData = G(latent)
         # print(fakeData.shape)
         fakeSource = D(fakeData.detach())
@@ -189,7 +188,7 @@ for epoch in range(100):
         torch.nn.utils.clip_grad_norm_(D.parameters(), 20)
         optimizerD.step()
         fakeSource = D(fakeData)
-        trueTensor = 0.9 * torch.ones(batch_size).view(-1, 1).cuda()
+        trueTensor = 0.9 * torch.ones(batch_size).view(-1, 1).cuda(gpu_id)
         lossG = criterionSource(fakeSource, trueTensor.expand_as(fakeSource))
         optimizerG.zero_grad()
         lossG.backward()
@@ -202,14 +201,15 @@ for epoch in range(100):
     if (epoch + 1) % 50 == 0:
         torch.save(G.state_dict(), DIRNAME + "G" + str(epoch) + ".pt")
         torch.save(D.state_dict(), DIRNAME + "D" + str(epoch) + ".pt")
-    if (epoch + 1) % 10 == 0:
+    if (epoch + 1) % 50 == 0:
         with torch.no_grad():
             G.eval()
             sample_image(epoch)
             G.train()
 G.eval()
-fakeSamples = G(Variable(torch.randn(int(9864 / 0.75), latentdim, 1)).cuda())
+fakeSamples = G(
+    Variable(torch.randn(int(9864 / 0.75), latentdim, 1)).cuda(gpu_id))
 
 sums = torch.trapezoid(fakeSamples.squeeze(),
                        dim=1).detach().cpu().numpy().argsort()[::-1].copy()
-torch.save(fakeSamples[sums], 'fake.pt')
+torch.save(fakeSamples[sums], f'fake_{data_type}.pt')

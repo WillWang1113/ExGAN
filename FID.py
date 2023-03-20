@@ -1,37 +1,38 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
 import matplotlib.pyplot as plt
-from skimage.transform import resize
-from torchvision import transforms
 from scipy import linalg
 import warnings
 
-
-data = torch.load('data/test.pt')
-numSamples = 57
+# TODO: Test set
+data = torch.load('test.pt')
+numSamples = len(data)
 EPOCHS = 50
 loss_func = nn.L1Loss()
 
+
 class AutoEncoder(nn.Module):
+
     def __init__(self):
         super(AutoEncoder, self).__init__()
-        self.encoder = nn.Sequential(nn.Linear(4096,128), nn.ReLU(True), nn.Dropout())
-        self.decoder = nn.Sequential(nn.Linear(128,4096))
-        
-    def forward(self,x):
+        self.encoder = nn.Sequential(nn.Linear(96, 128), nn.ReLU(True),
+                                     nn.Dropout())
+        self.decoder = nn.Sequential(nn.Linear(128, 96))
+
+    def forward(self, x):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
+
 
 ae = AutoEncoder().cuda()
 optimizer = torch.optim.Adam(ae.parameters(), lr=1e-3)
 data = data.reshape(data.shape[0], -1)[:numSamples]
 losses = []
 
-for epoch in range(EPOCHS):   
+for epoch in range(EPOCHS):
     x = torch.autograd.Variable(data[torch.randperm(numSamples)]).cuda()
     optimizer.zero_grad()
     pred = ae(x)
@@ -39,12 +40,13 @@ for epoch in range(EPOCHS):
     losses.append(loss.cpu().data.item())
     loss.backward()
     optimizer.step()
-plt.plot(losses)
+# plt.plot(losses)
 
 ae.eval()
 
-def FID(mu1, mu2, sigma1, sigma2): 
-    eps=1e-30
+
+def FID(mu1, mu2, sigma1, sigma2):
+    eps = 1e-30
     mu1 = np.atleast_1d(mu1)
     mu2 = np.atleast_1d(mu2)
 
@@ -71,7 +73,9 @@ def FID(mu1, mu2, sigma1, sigma2):
         covmean = covmean.real
 
     tr_covmean = np.trace(covmean)
-    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
+    return diff.dot(diff) + np.trace(sigma1) + np.trace(
+        sigma2) - 2 * tr_covmean
+
 
 def calcFID(data):
     data = data.reshape(data.shape[0], -1)
@@ -79,5 +83,7 @@ def calcFID(data):
     mean, covar = np.mean(features, 0), np.cov(features, rowvar=False)
     return FID(mean, base_mean, covar, base_covar)
 
+
 base_features = ae.encoder(Variable(data).cuda()).detach().cpu().numpy()
-base_mean, base_covar = np.mean(base_features, 0), np.cov(base_features, rowvar=False)
+base_mean, base_covar = np.mean(base_features, 0), np.cov(base_features,
+                                                          rowvar=False)

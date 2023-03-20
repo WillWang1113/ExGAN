@@ -1,18 +1,30 @@
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
+import numpy as np
+from scipy.stats import skewnorm, genpareto
+import argparse
 
-data = torch.load("my_real.pt")
-data = data.reshape([-1, 96])
-data = data.type(torch.float32)
+parser = argparse.ArgumentParser()
+parser.add_argument("--data", type=str, default="pv")
+parser.add_argument("--k", type=int, default=10)
+parser.add_argument("--c", type=float, default=0.75)
+opt = parser.parse_args()
+data_type = opt.data
+c, k = opt.c, opt.k
 
-sums = torch.trapezoid(data, dx=1 / 4, dim=-1).numpy().argsort()[::-1].copy()
-print(sums)
-print(data)
-data = data[sums]
-print(data)
-# data = data.reshape([-1, 1, 96])
-# torch.save(data, 'my_real.pt')
+X_s = torch.load(f'DistShift_{data_type}/fake{k}.pt')
+sums = torch.trapezoid(X_s, dx=1 / 4).cpu().numpy() / 10
+
+percentile = (100 * (1 - (c**k)))
+tail = np.where(sums > np.percentile(sums, percentile))[0][-1]
+
+body_dist, tail_dist = sums[tail:], sums[:tail]
+skewnorm_params = skewnorm.fit(sums)
+genpareto_params = genpareto.fit(tail_dist - sums[tail])
+# print(genpareto_params)
+evt_params = {
+    "genpareto_params": genpareto_params,
+    "threshold": float(sums[tail].squeeze())
+}
+print(evt_params)
+torch.save(evt_params, f"evt_params_{data_type}.pt")
+

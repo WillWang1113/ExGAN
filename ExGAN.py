@@ -2,24 +2,26 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Variable
-import numpy as np
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 import torch.optim as optim
 from torch import LongTensor, FloatTensor
 from scipy.stats import skewnorm, genpareto
-from torchvision.utils import save_image
-import sys
 import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--c", type=float, default=0.75)
-parser.add_argument("--gpu_id", type=int, default=0)
+parser.add_argument("--gpu_id", type=int, default=2)
 parser.add_argument('--k', type=int, default=10)
+parser.add_argument('--epochs', type=int, default=300)
+parser.add_argument("--data", type=str, default="pv")
 opt = parser.parse_args()
-cudanum = opt.gpu_id
+gpu_id = opt.gpu_id
+data_type = opt.data
+E = opt.epochs
+c = opt.c
+k = opt.k
 
 
 class NWSDataset(Dataset):
@@ -27,20 +29,23 @@ class NWSDataset(Dataset):
     NWS Dataset
     """
 
-    def __init__(self, fake='DistShift/fake10.pt', c=0.75, k=10, n=9864):
+    def __init__(self, fake='DistShift/fake10.pt', c=0.75, k=5, n=9864):
         val = int((c**k) * n)
-        self.real = torch.load('real.pt').cuda(cudanum)
-        self.fake = torch.load(fake).cuda(cudanum)
+        self.real = torch.load(f'real_{data_type}.pt').cuda(gpu_id)
+        self.fake = torch.load(fake).cuda(gpu_id)
         self.realdata = torch.cat([self.real[:val], self.fake[:n - val]], 0)
         indices = torch.randperm(n)
+        self.labels = torch.trapezoid(self.realdata, dx=1 / 4) / 10
         self.realdata = self.realdata[indices]
+        self.labels = self.labels[indices]
 
     def __len__(self):
         return self.realdata.shape[0]
 
     def __getitem__(self, item):
         img = self.realdata[item]
-        return img, img.sum() / 4096
+        lbl = self.labels[item]
+        return img, lbl
 
 
 def weights_init_normal(m):
@@ -127,22 +132,21 @@ class Discriminator(nn.Module):
 
 latentdim = 24
 criterionSource = nn.BCELoss()
-G = Generator(in_channels=latentdim, out_channels=1).cuda(cudanum)
-D = Discriminator(in_channels=1).cuda(cudanum)
+G = Generator(in_channels=latentdim, out_channels=1).cuda(gpu_id)
+D = Discriminator(in_channels=1).cuda(gpu_id)
 G.apply(weights_init_normal)
 D.apply(weights_init_normal)
 
-fakename = 'DistShift/fake5.pt'
+fakename = f'DistShift_{data_type}/fake{k}.pt'
 data = torch.load(fakename)
 real_code = torch.trapezoid(data, dx=1 / 4).cpu().numpy() / 10
 
 # TODO: fix the fitting
-genpareto_params = (-0.5157816898334942, 0, 0.38879824425992027)
-threshold = 1.4649727
+evt_params = torch.load(f"evt_params_{data_type}.pt")
+print(evt_params)
+genpareto_params = evt_params["genpareto_params"]
+threshold = evt_params["threshold"]
 rv = genpareto(*genpareto_params)
-
-c = opt.c
-k = opt.k
 
 
 def sample_genpareto(size):
@@ -151,7 +155,7 @@ def sample_genpareto(size):
 
 
 def sample_cont_code(batch_size):
-    return Variable(sample_genpareto((batch_size, 1, 1))).cuda(cudanum)
+    return Variable(sample_genpareto((batch_size, 1, 1))).cuda(gpu_id)
 
 
 optimizerG = optim.Adam(G.parameters(), lr=0.0002, betas=(0.5, 0.999))
@@ -161,8 +165,8 @@ static_code = sample_cont_code(36)
 
 def sample_image(batches_done):
     static_z = Variable(FloatTensor(torch.randn(
-        (36, latentdim, 1)))).cuda(cudanum)
-    static_sample = G(static_z, static_code).detach().cpu()
+        (36, latentdim, 1)))).cuda(gpu_id)
+    static_sample = G(static_z, static_code).detach().cpu().squeeze()
     fig, axs = plt.subplots(6, 6, sharex=True, sharey=True)
     axs = axs.flatten()
     for i in range(len(static_sample)):
@@ -174,18 +178,18 @@ def sample_image(batches_done):
     plt.close(fig)
 
 
-DIRNAME = 'ExGAN/'
+DIRNAME = f'ExGAN_{data_type}/'
 os.makedirs(DIRNAME, exist_ok=True)
 board = SummaryWriter(log_dir=DIRNAME)
 step = 0
-n = 9864
+n = len(torch.load(f"real_{data_type}.pt"))
 dataloader = DataLoader(NWSDataset(fake=fakename, c=c, k=k, n=n),
                         batch_size=256,
                         shuffle=True)
-for epoch in range(0, 100):
+for epoch in range(0, E):
     print(epoch)
     for images, labels in dataloader:
-        noise = 1e-5 * max(1 - (epoch / 100.0), 0)
+        noise = 1e-5 * max(1 - ((epoch + 1) / E), 0)
         step += 1
         batch_size = images.shape[0]
         trueTensor = 0.7 + 0.5 * torch.rand(batch_size)
@@ -196,13 +200,13 @@ for epoch in range(0, 100):
             probFlip * falseTensor + (1 - probFlip) * trueTensor,
             probFlip * trueTensor + (1 - probFlip) * falseTensor,
         )
-        trueTensor = trueTensor.view(-1, 1).cuda(cudanum)
-        falseTensor = falseTensor.view(-1, 1).cuda(cudanum)
-        images, labels = images.cuda(cudanum), labels.view(-1, 1).cuda(cudanum)
+        trueTensor = trueTensor.view(-1, 1).cuda(gpu_id)
+        falseTensor = falseTensor.view(-1, 1).cuda(gpu_id)
+        images, labels = images.cuda(gpu_id), labels.view(-1, 1).cuda(gpu_id)
         realSource = D(images, labels)
         realLoss = criterionSource(realSource,
                                    trueTensor.expand_as(realSource))
-        latent = Variable(torch.randn(batch_size, latentdim, 1)).cuda(cudanum)
+        latent = Variable(torch.randn(batch_size, latentdim, 1)).cuda(gpu_id)
         code = sample_cont_code(batch_size)
         fakeGen = G(latent, code)
         fakeGenSource = D(fakeGen.detach(), code)
@@ -234,7 +238,7 @@ for epoch in range(0, 100):
     if (epoch + 1) % 50 == 0:
         torch.save(G.state_dict(), DIRNAME + 'G' + str(epoch) + ".pt")
         torch.save(D.state_dict(), DIRNAME + 'D' + str(epoch) + ".pt")
-    if (epoch + 1) % 10 == 0:
+    if (epoch + 1) % 50 == 0:
         with torch.no_grad():
             G.eval()
             sample_image(epoch)

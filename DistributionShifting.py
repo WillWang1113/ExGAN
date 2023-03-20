@@ -1,21 +1,27 @@
 from torch.utils.tensorboard import SummaryWriter
-import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
 import os
 from torch.utils.data import Dataset, DataLoader
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
-import torch.nn.functional as F
-import torchvision.utils as vutils
 from torch.autograd import Variable
 from torch import LongTensor, FloatTensor
-from torchvision.utils import save_image
-import sys
+import argparse
 
-gpu_id = 0
+parser = argparse.ArgumentParser()
+parser.add_argument("--epochs", type=int, default=300)
+parser.add_argument("--data", type=str, default="pv")
+parser.add_argument("--c", type=float, default=0.75)
+parser.add_argument('--k', type=int, default=10)
+opt = parser.parse_args()
+E = opt.epochs
+data_type = opt.data
+c = opt.c
+k = opt.k
+
+gpu_id = 2
 
 
 class NWSDataset(Dataset):
@@ -25,7 +31,7 @@ class NWSDataset(Dataset):
 
     def __init__(self, fake='fake.pt', c=0.75, i=1, n=9864):
         val = int(n * (c**i))
-        self.real = torch.load('real.pt').cuda(gpu_id)
+        self.real = torch.load(f'real_{data_type}.pt').cuda(gpu_id)
         self.real.requires_grad = False
         self.fake = torch.load(fake).cuda(gpu_id)
         self.fake.requires_grad = False
@@ -150,26 +156,23 @@ def sample_image(stage, epoch):
     plt.close(fig)
 
 
-c = 0.75
-k = 5
-# k = 10
-DIRNAME = 'DistShift/'
+DIRNAME = f'DistShift_{data_type}/'
 os.makedirs(DIRNAME, exist_ok=True)
 board = SummaryWriter(log_dir=DIRNAME)
 
-G.load_state_dict(torch.load('DCGAN/G99.pt'))
-D.load_state_dict(torch.load('DCGAN/D99.pt'))
+G.load_state_dict(torch.load(f'DCGAN_{data_type}/G{E-1}.pt'))
+D.load_state_dict(torch.load(f'DCGAN_{data_type}/D{E-1}.pt'))
 step = 0
-fake_name = 'fake.pt'
-n = 9864
-for i in range(1, k):
+fake_name = f'fake_{data_type}.pt'
+n = len(torch.load(f"real_{data_type}.pt"))
+for i in range(k):
     dataloader = DataLoader(NWSDataset(fake=fake_name, c=c, i=i, n=n),
                             batch_size=256,
                             shuffle=True)
-    for epoch in range(100):
+    for epoch in range(E):
         print(epoch)
         for realdata in dataloader:
-            noise = 1e-5 * max(1 - (epoch / 100.0), 0)
+            noise = 1e-5 * max(1 - ((epoch + 1) / E), 0)
             step += 1
             batch_size = realdata[0].shape[0]
             trueTensor = 0.7 + 0.5 * torch.rand(batch_size)
@@ -215,7 +218,7 @@ for i in range(1, k):
             torch.save(
                 D.state_dict(),
                 DIRNAME + "Dstage" + str(i) + 'epoch' + str(epoch) + ".pt")
-        if (epoch + 1) % 10 == 0:
+        if (epoch + 1) % 50 == 0:
             with torch.no_grad():
                 G.eval()
                 sample_image(i, epoch)
@@ -228,7 +231,7 @@ for i in range(1, k):
 
         sums = torch.trapezoid(
             fakeSamples.squeeze(),
-            dim=1).detach().cpu().numpy().argsort()[::-1].copy()
+            dx=1 / 4).detach().cpu().numpy().argsort()[::-1].copy()
         fake_name = DIRNAME + 'fake' + str(i + 1) + '.pt'
         torch.save(fakeSamples.data[sums], fake_name)
         del fakeSamples
