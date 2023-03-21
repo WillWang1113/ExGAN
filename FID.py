@@ -2,14 +2,44 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import linalg
 import warnings
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--data", type=str, default="pv")
+parser.add_argument("--tau", type=float, default=0.2)
+parser.add_argument("--model", type=str, default="ExGAN")
+opt = parser.parse_args()
+data_type = opt.data
+tau = opt.tau
+model = opt.model
+if data_type == 'wind':
+    if tau == 0.2:
+        val = 0.9230  # tau = 0.2
+    elif tau == 0.1:
+        val = 1.2507  # tau = 0.1
+    elif tau == 0.05:
+        val = 1.5123  # tau = 0.05
+else:
+    if tau == 0.2:
+        val = 0.4981  # tau = 0.2
+    elif tau == 0.1:
+        val = 0.5409  # tau = 0.1
+    elif tau == 0.05:
+        val = 0.5734  # tau = 0.05
 
 # TODO: Test set
-data = torch.load('test.pt')
+data = torch.load(f'test_{data_type}.pt')
+sums = torch.trapezoid(data, dx=1 / 4) / 10
+sums = sums >= val
+data = data[sums]
+# num = int(tau * len(data))
+# data = data[:num]
+
+G_data = torch.load(f"{model}{tau}_{data_type}.pt")
 numSamples = len(data)
-EPOCHS = 50
+EPOCHS = 500
 loss_func = nn.L1Loss()
 
 
@@ -87,3 +117,5 @@ def calcFID(data):
 base_features = ae.encoder(Variable(data).cuda()).detach().cpu().numpy()
 base_mean, base_covar = np.mean(base_features, 0), np.cov(base_features,
                                                           rowvar=False)
+
+print(calcFID(G_data))

@@ -165,7 +165,7 @@ D.load_state_dict(torch.load(f'DCGAN_{data_type}/D{E-1}.pt'))
 step = 0
 fake_name = f'fake_{data_type}.pt'
 n = len(torch.load(f"real_{data_type}.pt"))
-for i in range(k):
+for i in range(1, k):
     dataloader = DataLoader(NWSDataset(fake=fake_name, c=c, i=i, n=n),
                             batch_size=256,
                             shuffle=True)

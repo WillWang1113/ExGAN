@@ -52,17 +52,19 @@ G.eval()
 G.requires_grad = False
 
 # TODO: TEST set
-real = torch.load('test_.pt').cuda(gpu_id)
-num = len(real)
+real = torch.load(f'test_{data_type}.pt').cuda(gpu_id)
+num = int(0.05 * len(real))
+real = real[:num]
 z = torch.zeros((num, latentdim, 1)).cuda(gpu_id)
 z.requires_grad = True
 
 optimizer = torch.optim.Adam([z], lr=1e-2)
 criterion = nn.MSELoss()
-for i in range(2000):
+for i in range(20000):
     pred = G(z)
     loss = criterion(pred, real)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    print(loss)
+    if i % 1000 == 0:
+        print(loss)

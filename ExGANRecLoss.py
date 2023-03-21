@@ -48,30 +48,33 @@ class Generator(nn.Module):
 
 latentdim = 24
 G = Generator(in_channels=latentdim, out_channels=1).cuda(gpu_id)
-
-evt_params = torch.load(f"evt_params_{data_type}.pt")
-genpareto_params = evt_params["genpareto_params"]
-threshold = evt_params["threshold"]
-rv = genpareto(*genpareto_params)
-
 G.load_state_dict(torch.load(f'ExGAN_{data_type}/G{epochs-1}.pt'))
 G.eval()
 G.requires_grad = False
 
 # TODO: TEST set
-real = torch.load('test_.pt').cuda(gpu_id)
-num = len(real)
+real = torch.load(f'test_{data_type}.pt').cuda(gpu_id)
+num = int(0.05 * len(real))
+real = real[:num]
 z = torch.zeros((num, latentdim, 1)).cuda(gpu_id)
 z.requires_grad = True
 
-code = torch.trapezoid(real, dx=1 / 4).cpu().numpy() / 10
+code = torch.trapezoid(real, dx=1 / 4, dim=-1).cuda(gpu_id) / 10
+code = code.unsqueeze(-1)
+# print(type(code))
+# print(code.shape)
+# print(type(real))
+# print(real.shape)
+# print(type(z))
+# print(z.shape)
 
 optimizer = torch.optim.Adam([z], lr=1e-2)
 criterion = nn.MSELoss()
-for i in range(2000):
+for i in range(20000):
     pred = G(z, code)
     loss = criterion(pred, real)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    print(loss)
+    if i % 1000 == 0:
+        print(loss)

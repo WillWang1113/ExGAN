@@ -10,7 +10,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--c", type=float, default=0.75)
 parser.add_argument('--k', type=int, default=10)
 parser.add_argument("--data", type=str, default="pv")
-parser.add_argument("--taus", type=list, default=[0.1, 0.05, 0.01])
+parser.add_argument("--taus", type=list, default=[0.2, 0.1, 0.05])
 parser.add_argument("--epochs", type=int, default=300)
 opt = parser.parse_args()
 data_type = opt.data
@@ -58,28 +58,37 @@ class Generator(nn.Module):
 latentdim = 24
 G = Generator(in_channels=latentdim, out_channels=1).cuda(gpu_id)
 
-evt_params = torch.load(f"evt_params_{data_type}.pt")
-genpareto_params = evt_params["genpareto_params"]
-threshold = evt_params["threshold"]
-rv = genpareto(*genpareto_params)
+train_data = torch.load(f"real_{data_type}.pt")
+code = torch.trapezoid(train_data, dx=1 / 4).squeeze() / 10
+# evt_params = torch.load(f"evt_params_{data_type}.pt")
+# genpareto_params = evt_params["genpareto_params"]
+# threshold = evt_params["threshold"]
+# rv = genpareto(*genpareto_params)
 
 G.load_state_dict(torch.load(f'DCGAN_{data_type}/G{epochs-1}.pt'))
 G.eval()
 
 for tau in taus:
-    tau_prime = tau / (c**k)
-    val = rv.ppf(1 - tau_prime) + threshold
+    # tau_prime = tau / (c**k)
+    # val = rv.ppf(1 - tau_prime) + threshold
+    num = int(len(train_data) * tau)
+    val = code[num]
+    print("target:\n", val)
     images = []
     count = 0
     t = time.time()
     while count < 100:
-        latent = Variable(FloatTensor(torch.randn((100, latentdim, 1)))).cuda()
+        latent = Variable(FloatTensor(torch.randn(
+            (500, latentdim, 1)))).cuda(gpu_id)
         image = G(latent)
+        # print(image[0])
+        print((torch.trapezoid(image, dx=1 / 4) / 10).max())
         sums = (torch.trapezoid(image, dx=1 / 4) / 10) >= val
 
         if sums.nonzero().shape[0] > 0:
             images.append(image[sums])
             count += sums.nonzero().shape[0]
+            print(count)
     print(time.time() - t)
     images = torch.cat(images, 0)[:100]
     torch.save(images, 'DCGAN' + str(tau) + f'_{data_type}.pt')
