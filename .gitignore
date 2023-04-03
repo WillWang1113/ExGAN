@@ -1,0 +1,10 @@
+CDCGAN*/
+DCGAN*/
+DistShift*/
+ExGAN*/
+evt_params*.pt
+ExGAN*.pt
+fake*.pt
+
+nohup.out
+logs/

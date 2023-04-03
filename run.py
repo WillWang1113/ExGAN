@@ -1,14 +1,14 @@
 import os
 
-data_type = ["pv", "wind"]
-E = 350
+data_type = ["wind"]
+E = 500
 
 for d in data_type:
-    # os.system(f"python DCGAN.py --epochs={E} --data={d}")
-    # print("\n DCGAN Done! \n")
+    os.system(f"python DCGAN.py --epochs={E} --data={d}")
+    print("\n DCGAN Done! \n")
 
-    # os.system(f"python DistributionShifting.py --epochs={E} --data={d}")
-    # print("\n Distribution Shifted! \n")
+    os.system(f"python DistributionShifting.py --epochs={E} --data={d}")
+    print("\n Distribution Shifted! \n")
 
     os.system(f"python PrepareData.py --data={d}")
     print("\n Prepared Data! \n")

@@ -161,7 +161,7 @@ for epoch in range(E):
     for images in dataloader:
         noise = 1e-5 * max(1 - ((epoch + 1) / E), 0)
         step += 1
-        batch_size = images[0].shape[0]
+        batch_size = images.shape[0]
         trueTensor = 0.7 + 0.5 * torch.rand(batch_size)
         falseTensor = 0.3 * torch.rand(batch_size)
         probFlip = torch.rand(batch_size) < 0.05
@@ -188,6 +188,7 @@ for epoch in range(E):
         torch.nn.utils.clip_grad_norm_(D.parameters(), 20)
         optimizerD.step()
         fakeSource = D(fakeData)
+        
         trueTensor = 0.9 * torch.ones(batch_size).view(-1, 1).cuda(gpu_id)
         lossG = criterionSource(fakeSource, trueTensor.expand_as(fakeSource))
         optimizerG.zero_grad()

@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 import argparse
+import os
+import numpy as np
+import random
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--data", type=str, default="pv")
@@ -10,6 +13,17 @@ data_type = opt.data
 epochs = opt.epochs
 gpu_id = 2
 
+def setup_seed(seed: int = 9):
+    """set a fix random seed.
+
+    Args:
+        seed (int, optional): random seed. Defaults to 9.
+    """
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 def convTBNReLU(in_channels, out_channels, kernel_size=4, stride=2, padding=1):
     return nn.Sequential(
@@ -45,6 +59,7 @@ class Generator(nn.Module):
         return torch.tanh(self.block5(out))
 
 
+setup_seed()
 latentdim = 24
 G = Generator(in_channels=latentdim, out_channels=1).cuda(gpu_id)
 G.load_state_dict(torch.load(f'DCGAN_{data_type}/G{epochs-1}.pt'))
@@ -60,11 +75,16 @@ z.requires_grad = True
 
 optimizer = torch.optim.Adam([z], lr=1e-2)
 criterion = nn.MSELoss()
-for i in range(20000):
+n_iter = 10000
+for i in range(n_iter):
     pred = G(z)
     loss = criterion(pred, real)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    if i % 1000 == 0:
-        print(loss)
+    if i % 2000 == 0 or i == (n_iter - 1):
+        print(loss.item())
+
+# out_dir = "./logs/"
+# os.makedirs(out_dir, exist_ok=True)
+# torch.save(G(z).detach().cpu().numpy(), out_dir + f"DCGAN_{data_type}_np.pt")
